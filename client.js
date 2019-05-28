@@ -1,61 +1,61 @@
-//our username
+// our username
 var name;
 var connectedUser;
 var isServer;
 
-//connecting to our signaling server
+// connecting to our signaling server
 var conn = new WebSocket('wss://rarywebrtc.xyz:8080');
 
-conn.onopen = function () {
-   console.log("Connected to the signaling server");
+conn.onopen = function() {
+  console.log('Connected to the signaling server');
 };
 
-//when we got a message from a signaling server
-conn.onmessage = function (msg) {
-   console.log("Got message", msg.data);
+// when we got a message from a signaling server
+conn.onmessage = function(msg) {
+  console.log('Got message', msg.data);
 
-   var data = JSON.parse(msg.data);
+  var data = JSON.parse(msg.data);
 
-   switch(data.type) {
-      case "login":
-         handleLogin(data.success);
-         break;
-      //when somebody wants to call us
-      case "offer":
-         handleOffer(data.offer, data.name);
-         break;
-      case "answer":
-         handleAnswer(data.answer);
-         break;
-      //when a remote peer sends an ice candidate to us
-      case "candidate":
-         handleCandidate(data.candidate);
-         break;
-      case "leave":
-         handleLeave();
-         break;
-      default:
-         break;
-   }
+  switch (data.type) {
+    case 'login':
+      handleLogin(data.success);
+      break;
+    // when somebody wants to call us
+    case 'offer':
+      handleOffer(data.offer, data.name);
+      break;
+    case 'answer':
+      handleAnswer(data.answer);
+      break;
+    // when a remote peer sends an ice candidate to us
+    case 'candidate':
+      handleCandidate(data.candidate);
+      break;
+    case 'leave':
+      if (!isServer)
+        handleLeave();
+      break;
+    default:
+      break;
+  }
 };
 
-conn.onerror = function (err) {
-   console.log("Got error", err);
+conn.onerror = function(err) {
+  console.log('Got error', err);
 };
 
-//alias for sending JSON encoded messages
+// alias for sending JSON encoded messages
 function send(message) {
-   //attach the other peer username to our messages
-   if (connectedUser) {
-      message.name = connectedUser;
-   }
+  // attach the other peer username to our messages
+  if (connectedUser) {
+    message.name = connectedUser;
+  }
 
-   conn.send(JSON.stringify(message));
+  conn.send(JSON.stringify(message));
 };
-
 
 //******
-//UI selectors block
+// UI selectors block
 //******
 
 var loginPage = document.querySelector('#loginPage');
@@ -69,165 +69,154 @@ var callBtn = document.querySelector('#callBtn');
 
 var hangUpBtn = document.querySelector('#hangUpBtn');
 
-//hide call page
-callPage.style.display = "none";
+// hide call page
+callPage.style.display = 'none';
 
 // Login when the user clicks the button
-loginServerBtn.addEventListener("click", function (event) {
-   name = usernameInput.value;
-    isServer = true;
+loginServerBtn.addEventListener('click', function(event) {
+  name = usernameInput.value;
+  isServer = true;
 
-   if (name.length > 0) {
-      send({
-         type: "login",
-         name: name
-      });
-   }
-
+  if (name.length > 0) {
+    send({type: 'login', name: name});
+  }
 });
 
 // Login when the user clicks the button
-loginClientBtn.addEventListener("click", function (event) {
-   name = usernameInput.value;
-    isServer = false;
+loginClientBtn.addEventListener('click', function(event) {
+  name = usernameInput.value;
+  isServer = false;
 
-   if (name.length > 0) {
-      send({
-         type: "login",
-         name: name
-      });
-   }
-
+  if (name.length > 0) {
+    send({type: 'login', name: name});
+  }
 });
 
 function handleLogin(success) {
+  if (success === false) {
+    alert('Ooops...try a different username');
+  } else {
+    loginPage.style.display = 'none';
+    callPage.style.display = 'block';
 
-   if (success === false) {
-      alert("Ooops...try a different username");
-   } else {
-      loginPage.style.display = "none";
-      callPage.style.display = "block";
+    //**********************
+    // Starting a peer connection
+    //**********************
+    // using Google public stun server
+    var configuration = {
+      'iceServers': [{'urls': 'stun:stun2.1.google.com:19302'}]
+    };
 
-      //**********************
-      //Starting a peer connection
-      //**********************
+    yourConn = new RTCPeerConnection(configuration);
 
-      //getting local video stream
-      const promise = navigator.mediaDevices.getUserMedia({ video: true, audio: false });
+    // Setup ice handling
+    yourConn.onicecandidate = function(event) {
+      if (event.candidate) {
+        send({type: 'candidate', candidate: event.candidate});
+      }
+    };
 
-      promise.then(successCallback)
-             .catch(errorCallback);
+    // getting local video stream
+    if (isServer) {
+      const promise =
+          navigator.mediaDevices.getUserMedia({video: true, audio: false});
+      promise.then(successCallback).catch(errorCallback);
+    } else {
 
-      function successCallback(myStream) {
-        stream = myStream;
+      // when a remote user adds stream to the peer connection, we display it
+      yourConn.ontrack = function(e) {
+        video.srcObject = e.streams[0];
+      };
 
-        //displaying local video stream on the page
-        localVideo.srcObject = stream;
+      yourConn.addTransceiver('video', {direction: 'recvonly'});
+    }
 
-        //using Google public stun server
-        var configuration = {
-           "iceServers": [{ "urls": "stun:stun2.1.google.com:19302" }]
-        };
+    function successCallback(myStream) {
+      stream = myStream;
 
-        yourConn = new RTCPeerConnection(configuration);
+      // displaying local video stream on the page
+      if (isServer)
+        video.srcObject = stream;
 
-        // setup stream listening
-        // this is obselete
-        // yourConn.addStream(stream);
-        stream.getTracks().forEach(function(track) {
-          yourConn.addTrack(track, stream);
+      // setup stream listening
+      // this is obselete
+      // yourConn.addStream(stream);
+      stream.getTracks().forEach(function(track) {
+        yourConn.addTransceiver(track, {
+          streams: [stream],
+          direction: 'sendonly'
         });
+      });
 
-        //when a remote user adds stream to the peer connection, we display it
-        yourConn.ontrack = function (e) {
-           remoteVideo.srcObject = e.streams[0];
-        };
-
-        // Setup ice handling
-        yourConn.onicecandidate = function (event) {
-
-           if (event.candidate) {
-              send({
-                 type: "candidate",
-                 candidate: event.candidate
-              });
-           }
-
-        };
-
-      }
-      function errorCallback(error) {
-         alert(error);
-      }
-   }
+    }
+    function errorCallback(error) {
+      alert(error);
+    }
+  }
 };
 
-localVideo = document.querySelector('#localVideo');
-var remoteVideo = document.querySelector('#remoteVideo');
+video = document.querySelector('#video');
 
 var yourConn;
 var stream;
 
+// initiating a call
+callBtn.addEventListener('click', function() {
+  var callToUsername = callToUsernameInput.value;
 
-//initiating a call
-callBtn.addEventListener("click", function () {
-   var callToUsername = callToUsernameInput.value;
+  if (callToUsername.length > 0) {
+    connectedUser = callToUsername;
 
-   if (callToUsername.length > 0) {
+    // create an offer
+    yourConn.createOffer().then(function(offer) {
+      send({type: 'offer', offer: offer});
 
-      connectedUser = callToUsername;
-
-      // create an offer
-      yourConn.createOffer().then(function (offer) {
-         send({
-            type: "offer",
-            offer: offer
-         });
-
-         yourConn.setLocalDescription(offer);
-        })
-   }
+      yourConn.setLocalDescription(offer);
+    })
+  }
 });
 
-//when somebody sends us an offer
+// when somebody sends us an offer
 function handleOffer(offer, name) {
-   connectedUser = name;
-   yourConn.setRemoteDescription(new RTCSessionDescription(offer));
+  connectedUser = name;
+  yourConn.setRemoteDescription(new RTCSessionDescription(offer));
 
-   //create an answer to an offer
-   yourConn.createAnswer().then(function (answer) {
-      yourConn.setLocalDescription(answer);
+  if (stream) {
+    yourConn.getTransceivers().forEach(transceiver => {
+      const { kind } = transceiver.receiver.track;
+      const [ track ] = kind === 'video' ? stream.getVideoTracks() : stream.getAudioTracks();
+      transceiver.sender.replaceTrack(track);
+      transceiver.direction = 'sendonly';
+    });
+  }
+  // create an answer to an offer
+  yourConn.createAnswer().then(function(answer) {
+    yourConn.setLocalDescription(answer);
 
-      send({
-         type: "answer",
-         answer: answer
-      });
-
-   })
+    send({type: 'answer', answer: answer});
+  })
 };
 
-//when we got an answer from a remote user
+// when we got an answer from a remote user
 function handleAnswer(answer) {
-   yourConn.setRemoteDescription(new RTCSessionDescription(answer));
+  yourConn.setRemoteDescription(new RTCSessionDescription(answer));
 };
 
-//when we got an ice candidate from a remote user
+// when we got an ice candidate from a remote user
 function handleCandidate(candidate) {
-   yourConn.addIceCandidate(new RTCIceCandidate(candidate));
+  yourConn.addIceCandidate(new RTCIceCandidate(candidate));
 };
 
 function handleLeave() {
-   connectedUser = null;
-   remoteVideo.srcObject = null;
+  connectedUser = null;
+  video.srcObject = null;
 
-   // yourConn.close();
-   yourConn.onicecandidate = null;
-   // yourConn.ontrack = null;
+  // yourConn.close();
+  yourConn.onicecandidate = null;
+  // yourConn.ontrack = null;
 };
 
-hangUpBtn.addEventListener("click", function () {
-   send({
-      type: "leave"
-   });
-   handleLeave();
+hangUpBtn.addEventListener('click', function() {
+  send({type: 'leave'});
+  handleLeave();
 });
